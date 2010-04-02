@@ -8,8 +8,23 @@
 %-export([sim_distance/2]).
 -compile(export_all).
 
--import(lists, [sum/1,foldl/3]).
+-import(lists, [sum/1,foldl/3,sort/1,reverse/1]).
 -import(math,  [pow/2,sqrt/1]).
+
+
+%% @doc Critcs with most similar tastes as 'mine'
+%%
+%% Which advice should I take?
+%% Try: top_matches("Toby",3) to find out.
+%%
+top_matches(P)   -> top_matches(P,5).
+top_matches(P,N) -> top_matches(P,N,sim_pearson).
+top_matches(Person,N,Similarity) ->
+    Scores = [{?MODULE:Similarity(Person,Other),Other}
+              || {Other,_} <- data(),
+                 Other /= Person],
+    take(N,reverse(sort(Scores))).
+    
 
 
 %% @doc Pearson Correlation Score
@@ -69,4 +84,9 @@ prefs(P) ->
 data() ->
     {ok,Data} = file:consult("priv/recommendations.data"),
     Data.
+    
+%% Should be in lists.erl...
+take(N,L) ->
+    {R,_} = lists:split(N,L),
+    R.
     
