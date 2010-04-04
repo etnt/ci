@@ -12,6 +12,39 @@
 -import(math,  [pow/2,sqrt/1]).
 
 
+%% @doc Get a movie recommendation.
+%%      Also, return a guess at what my rating would be.
+%%      Produce a weighted score that calculates how similar
+%%      a critics is to me and what score the movie got from him/her. 
+%%
+get_recommendations(Person) ->
+    get_recommendations(Person, sim_pearson).
+
+get_recommendations(Person, Similarity) ->
+    Dict = sim_sum(Person, Similarity, orddict:new()),
+    reverse(sort([{Total/SimSum, Name} || 
+                     {Name, {Total,SimSum,_N}} <- orddict:to_list(Dict)])).
+    
+
+sim_sum(Person, Similarity, Dict) ->
+    F = fun({Other,Prefs},Acc) when Other /= Person -> 
+                sim_sum_prefs(Prefs, ?MODULE:Similarity(Person,Other), Acc);
+           (_,Acc) -> Acc
+        end,
+    foldl(F, Dict, data()).
+
+sim_sum_prefs(Prefs, Sim, Dict) when Sim > 0 ->
+    F = fun({Movie,Point}, Acc) -> sim_sum_update(Movie, Point, Sim, Acc) end,
+    foldl(F, Dict, Prefs);
+%% Ignore Scores of zero or lower
+sim_sum_prefs(_Prefs, _Sim, Dict) ->
+    Dict.
+
+sim_sum_update(Key, Point, Sim, Dict) ->
+    try orddict:update(Key, fun({V,S,N}) -> {(Point*Sim)+V,S+Sim,N+1} end, Dict)
+    catch _:_ -> orddict:store(Key, {Point*Sim,Sim,1}, Dict) end.
+           
+
 %% @doc Critcs with most similar tastes as 'mine'
 %%
 %% Which advice should I take?
@@ -90,3 +123,7 @@ take(N,L) ->
     {R,_} = lists:split(N,L),
     R.
     
+
+
+            
+                            
