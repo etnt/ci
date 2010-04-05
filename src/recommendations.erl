@@ -12,6 +12,22 @@
 -import(math,  [pow/2,sqrt/1]).
 
 
+%% @doc Create a dictionary of items showing which other item they are most similar to.
+%%
+%%
+calc_similar_items()       -> calc_similar_items(data()).
+calc_similar_items(Data)   -> calc_similar_items(Data, 10).
+calc_similar_items(Data,N) -> calc_similar_items(Data, N, sim_distance).
+calc_similar_items(Data, N, Similarity) ->
+    ItemPrefs = transform_data(Data),
+    foldl(
+      fun({Item,_},Dict) ->
+              Scores =top_matches(Item, N, Similarity,ItemPrefs),
+              orddict:store(Item,Scores,Dict)
+      end, orddict:new(), ItemPrefs).
+
+
+
 %% @doc Get a movie recommendation.
 %%      
 %% Return a guess at what my rating would be.
@@ -39,7 +55,7 @@ sim_sum(Person, Similarity, Prefs, Dict) ->
                 sim_sum_prefs(L, ?MODULE:Similarity(Person,Other,Prefs), Acc);
            (_,Acc) -> Acc
         end,
-    foldl(F, Dict, ?MODULE:Prefs()).
+    foldl(F, Dict, gen_data(Prefs)).
 
 sim_sum_prefs(Prefs, Sim, Dict) when Sim > 0 ->
     F = fun({Movie,Point}, Acc) -> sim_sum_update(Movie, Point, Sim, Acc) end,
@@ -62,7 +78,7 @@ sim_sum_update(Key, Point, Sim, Dict) ->
 %%
 %%   top_matches("Toby",3) to find out.
 %%
-%% Also, by swapping the data, you'll find out similar movies, try:
+%% Also, by swapping the data, you'll find out similar movies, try:<
 %%
 %%   top_matches("Superman Returns",3,sim_pearson,transform_data).
 %%
@@ -71,11 +87,10 @@ top_matches(P,N)            -> top_matches(P,N,sim_pearson).
 top_matches(P,N,Similarity) -> top_matches(P,N,Similarity,data).
 top_matches(Person,N,Similarity,Prefs) ->
     Scores = [{?MODULE:Similarity(Person,Other,Prefs),Other}
-              || {Other,_} <- ?MODULE:Prefs(),
+              || {Other,_} <- gen_data(Prefs),
                  Other /= Person],
     take(N,reverse(sort(Scores))).
     
-
 
 %% @doc Pearson Correlation Score
 %%      
@@ -141,8 +156,11 @@ process_common_prefs(P1,P2,Prefs,F) ->
                  {N2,S2} <- prefs(P2,Prefs),
                  N1 == N2].
 
-%% Group the data around the Movies instead.
+%% Group the data around the Movies (items) instead.
 transform_data() ->
+    transform_data(data()).
+
+transform_data(Data) ->
     orddict:to_list(
       lists:foldl(
         fun({Person,L}, Dict) -> 
@@ -154,12 +172,15 @@ transform_data() ->
                             [{Person,Pref}],
                             Dict2)
                   end, Dict, L)
-        end, orddict:new(), data())
+        end, orddict:new(), Data)
      ).
                                                                    
                         
 prefs(P,Prefs) ->
-    proplists:get_value(P, ?MODULE:Prefs()).
+    proplists:get_value(P, gen_data(Prefs)).
+
+gen_data(Prefs) when is_atom(Prefs) -> ?MODULE:Prefs();
+gen_data(Prefs) when is_list(Prefs) -> Prefs.
 
 data() ->
     {ok,Data} = file:consult("priv/recommendations.data"),
@@ -167,8 +188,8 @@ data() ->
     
 %% Should be in lists.erl...
 take(N,L) ->
-    {R,_} = lists:split(N,L),
-    R.
+    try {R,_} = lists:split(N,L), R
+    catch _:_ -> L end.
     
 
 
