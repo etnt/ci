@@ -22,11 +22,18 @@
 %%
 %%  Prefs = load_movie_lens().
 %%
-%%  % 
+%%  % On my Dell Vostro Laptop...
+%%  % ...this takes roughly 24 seconds
 %%  get_recommendations("87",sim_distance,Prefs).
 %%
+%%  % This takes about an hour...
 %%  ItemSim = calc_similar_items(Prefs,50).
+%%
+%%  % ...but this only takes ~0.5 seconds.
 %%  get_recommended_items(Prefs, ItemSim, "87")
+%%
+%%  % Use your own movie ratings to get a recommendation
+%%  get_recommended_items(ItemSim, [{"GoldenEye (1995)",2.5},...])
 %%
 load_movie_lens() ->
     %% Get the movie titles.
@@ -71,6 +78,9 @@ get_recommended_items(User) ->
 
 get_recommended_items(PrefsTid, ItemTid, User) ->
     UserRatings = ets_lookup(User,PrefsTid),
+    get_recommended_items(ItemTid, UserRatings).
+
+get_recommended_items(ItemTid, UserRatings) ->
     %% Loop over items rated by this user
     D = foldl(
           fun({Item,Rating}, Dict) ->
