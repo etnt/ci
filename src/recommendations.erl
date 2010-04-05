@@ -8,8 +8,54 @@
 %-export([sim_distance/2]).
 -compile(export_all).
 
+-include_lib("eunit/include/eunit.hrl").
+
 -import(lists, [sum/1,foldl/3,sort/1,reverse/1]).
 -import(math,  [pow/2,sqrt/1]).
+
+
+%% @doc Load the MovieLens dataset.
+%%
+%% This function creates a dictionary based on the "Movie Lens Data Sets",
+%% that can be downloaded from: http://www.grouplens.org/ 
+%% Try, for userid(87):
+%%
+%%  Prefs = load_movie_lens().
+%%
+%%  % 
+%%  get_recommendations("87",sim_distance,Prefs).
+%%
+%%  ItemSim = calc_similar_items(Prefs,50).
+%%  get_recommended_items(Prefs, ItemSim, "87")
+%%
+load_movie_lens() ->
+    %% Get the movie titles.
+    {ok,Iz}=file:read_file("priv/u.item.zip"),
+    {ok,[{_Fname,IzBin}]} = zip:unzip(Iz,[memory]),
+    IzLines = string:tokens(binary_to_list(IzBin), "\n"),
+    Movies = foldl(fun(Line,Mtid) -> 
+                           [Id,Title|_] = string:tokens(Line,"|"),
+                           ets:insert(Mtid,{Id,Title}),
+                           Mtid
+                   end, ets:new(?MODULE,[]), IzLines),
+    
+    %% Load data
+    {ok,Dz}=file:read_file("priv/u.data.zip"),
+    {ok,[{_Fname2,DzBin}]} = zip:unzip(Dz,[memory]),
+    DzLines = string:tokens(binary_to_list(DzBin), "\n"),
+    foldl(fun(Line,Ptid) -> 
+                  [User,Mid,Rating,_Ts|_] = string:tokens(Line,"\t"),
+                  ets_append(User,
+                             {ets_lookup(Mid,Movies),
+                              list_to_integer(Rating)*1.0},
+                             Ptid),
+                  Ptid
+          end, ets:new(?MODULE,[]), DzLines).
+
+append_to_dict(Key, Value, Dict) ->
+    try orddict:append(Key, Value, Dict)
+    catch _:_ -> orddict:store(Key, [Value], Dict) end.
+        
 
 
 %% @doc Get weighted recommendations using a pre-calculated dictionary.
@@ -19,8 +65,12 @@
 %% This function will get all items that a user has ranked, find the 
 %% similar items, and weight them according to how similar they are.
 %%
-get_recommended_items(Prefs, ItemDict, User) ->
-    UserRatings = prefs(User,Prefs),
+get_recommended_items(User) ->
+    Tid = data2(),
+    get_recommended_items(Tid, calc_similar_items(Tid), User).
+
+get_recommended_items(PrefsTid, ItemTid, User) ->
+    UserRatings = ets_lookup(User,PrefsTid),
     %% Loop over items rated by this user
     D = foldl(
           fun({Item,Rating}, Dict) ->
@@ -33,28 +83,51 @@ get_recommended_items(Prefs, ItemDict, User) ->
                                 false -> sim_sum_update(Item2, Rating, Sim, Dict2)
                         end
                     end,
-                    Dict, orddict:fetch(Item,ItemDict))
+                    Dict, ets_lookup(Item, ItemTid))
           end,
           orddict:new(), UserRatings),
     reverse(sort([{Total/SimSum, Name} || 
                      {Name, {Total,SimSum,_N}} <- orddict:to_list(D)])).
  
     
+-ifdef(EUNIT).
+get_recommended_items_test() ->
+    ?assertMatch({3.1667425234070894,"The Night Listener"},
+                 hd(get_recommended_items("Toby"))).
+-endif.
 
 
 %% @doc Create a dictionary of items showing which other item they are most similar to.
 %%
-calc_similar_items()       -> calc_similar_items(data()).
-calc_similar_items(Data)   -> calc_similar_items(Data, 10).
-calc_similar_items(Data,N) -> calc_similar_items(Data, N, sim_distance).
-calc_similar_items(Data, N, Similarity) ->
-    ItemPrefs = transform_data(Data),
-    foldl(
-      fun({Item,_},Dict) ->
-              Scores =top_matches(Item, N, Similarity,ItemPrefs),
-              orddict:store(Item,Scores,Dict)
-      end, orddict:new(), ItemPrefs).
+calc_similar_items()      -> calc_similar_items(data2()).
+calc_similar_items(Tid)   -> calc_similar_items(Tid, 10).
+calc_similar_items(Tid,N) -> calc_similar_items(Tid, N, sim_distance).
+calc_similar_items(Tid, N, Similarity) ->
+    Tid2 = transform_data2(Tid),
+    Size = ets:info(Tid2,size),
+    R=ets:foldl(
+        fun({Item,_},{I,Tid3}) ->
+                print(I,Size),
+                Scores = top_matches(Item, N, Similarity, Tid2),
+                ets:insert(Tid3,{Item,Scores}),
+                {I+1,Tid3}
+        end, {1,ets:new(?MODULE,[])}, Tid2),
+    element(2,R).
 
+-ifdef(EUNIT).
+calc_similar_items_test() ->
+    ?assertMatch({"Lady in the Water",
+                  [{0.4494897427831781,"You, Me and Dupree"},
+                   {0.38742588672279304,"The Night Listener"},
+                   {0.3483314773547883,"Snakes on a Plane"},
+                   {0.3483314773547883,"Just My Luck"},
+                   {0.2402530733520421,"Superman Returns"}]},
+                 hd(ets:tab2list(calc_similar_items()))).
+-endif.
+
+%% Print a status update for large datasets.
+print(I,Len) when (I rem 10) == 0 -> io:format("~p/~p~n",[I,Len]);
+print(_, _)                         -> ok.
 
 
 %% @doc Get a movie recommendation.
@@ -71,20 +144,25 @@ calc_similar_items(Data, N, Similarity) ->
 %%  get_recommendations("Just My Luck",sim_pearson,transform_data).
 %%
 get_recommendations(Person) ->
-    get_recommendations(Person, sim_pearson, data).
+    get_recommendations(Person, sim_pearson, data2()).
 
-get_recommendations(Person, Similarity, Prefs) ->
-    Dict = sim_sum(Person, Similarity, Prefs, orddict:new()),
+get_recommendations(Person, Similarity, Tid) ->
+    Dict = sim_sum(Person, Similarity, Tid, orddict:new()),
     reverse(sort([{Total/SimSum, Name} || 
                      {Name, {Total,SimSum,_N}} <- orddict:to_list(Dict)])).
+
+-ifdef(EUNIT).
+get_recommendations_test() ->
+    ?assertMatch({3.9024195568915734,"Superman Returns"}, hd(get_recommendations("Toby"))).
+-endif.
     
 
-sim_sum(Person, Similarity, Prefs, Dict) ->
+sim_sum(Person, Similarity, Tid, Dict) ->
     F = fun({Other,L},Acc) when Other /= Person -> 
-                sim_sum_prefs(L, ?MODULE:Similarity(Person,Other,Prefs), Acc);
+                sim_sum_prefs(L, ?MODULE:Similarity(Person,Other,Tid), Acc);
            (_,Acc) -> Acc
         end,
-    foldl(F, Dict, gen_data(Prefs)).
+    ets:foldl(F, Dict, Tid).
 
 sim_sum_prefs(Prefs, Sim, Dict) when Sim > 0 ->
     F = fun({Movie,Point}, Acc) -> sim_sum_update(Movie, Point, Sim, Acc) end,
@@ -113,12 +191,20 @@ sim_sum_update(Key, Point, Sim, Dict) ->
 %%
 top_matches(P)              -> top_matches(P,5).
 top_matches(P,N)            -> top_matches(P,N,sim_pearson).
-top_matches(P,N,Similarity) -> top_matches(P,N,Similarity,data).
-top_matches(Person,N,Similarity,Prefs) ->
-    Scores = [{?MODULE:Similarity(Person,Other,Prefs),Other}
-              || {Other,_} <- gen_data(Prefs),
-                 Other /= Person],
+top_matches(P,N,Similarity) -> top_matches(P,N,Similarity,data2()).
+top_matches(Person,N,Similarity,Tid) ->
+    Scores = 
+        ets:foldl(
+          fun({Other,_},Acc) when Other /= Person ->
+                  [{?MODULE:Similarity(Person,Other,Tid),Other}|Acc];
+             (_,Acc) -> Acc
+          end, [], Tid),
     take(N,reverse(sort(Scores))).
+
+-ifdef(EUNIT).
+top_matches_test() ->
+    ?assertMatch({0.9912407071619297,"Lisa Rose"}, hd(top_matches("Toby"))).
+-endif.
     
 
 %% @doc Pearson Correlation Score
@@ -127,23 +213,23 @@ top_matches(Person,N,Similarity,Prefs) ->
 %% input data isn't well normalized.
 %% 
 sim_pearson(P1,P2) ->
-    sim_pearson(P1,P2,data).
+    sim_pearson(P1,P2,data2()).
 
-sim_pearson(P1,P2,Prefs) ->
+sim_pearson(P1,P2,Tid) ->
     % Add up all the preferences
-    {Sum1,Sum2} = sum_pearson(P1,P2,Prefs,
+    {Sum1,Sum2} = sum_pearson(P1,P2,Tid,
                               fun(S1,S2) -> {S1,S2} end),
 
     % Sum up the squares
-    {Sum1Sq,Sum2Sq} = sum_pearson(P1,P2,Prefs,
+    {Sum1Sq,Sum2Sq} = sum_pearson(P1,P2,Tid,
                                   fun(S1,S2) -> {pow(S1,2),pow(S2,2)} end),
 
     % Sum up the products
-    {Psum,_} = sum_pearson(P1,P2,Prefs,
+    {Psum,_} = sum_pearson(P1,P2,Tid,
                            fun(S1,S2) -> {S1*S2,0} end),
     
     % Calculate Pearson score
-    N   = sum(process_common_prefs(P1,P2,Prefs,
+    N   = sum(process_common_prefs(P1,P2,Tid,
                                    fun(_,_) -> 1 end)),
     Num = Psum - (Sum1*(Sum2/N)),
     Den = den(Sum1Sq,Sum2Sq,Sum1,Sum2,N),
@@ -156,12 +242,14 @@ sim_pearson(P1,P2,Prefs) ->
 den(Sum1Sq,Sum2Sq,Sum1,Sum2,N) ->
     sqrt(Sum1Sq - pow(Sum1,2) / N) * sqrt(Sum2Sq - pow(Sum2,2) / N).
                                    
-sum_pearson(P1,P2,F) ->
-    sum_pearson(P1,P2,data,F).
-
-sum_pearson(P1,P2,Prefs,F) ->
-    L = process_common_prefs(P1,P2,Prefs,F),
+sum_pearson(P1,P2,Tid,F) ->
+    L = process_common_prefs(P1,P2,Tid,F),
     foldl(fun({X1,X2}, {Acc1,Acc2}) -> {X1+Acc1,X2+Acc2} end, {0,0}, L).
+
+-ifdef(EUNIT).
+sim_pearson_test() ->
+    ?assertMatch(0.9912407071619297, sim_pearson("Toby","Lisa Rose")).
+-endif.
 
 
 %% @doc Euclidean Distance
@@ -170,50 +258,33 @@ sum_pearson(P1,P2,Prefs,F) ->
 %% calculating the distance between each preference.
 %% 
 sim_distance(P1,P2) ->
-    sim_distance(P1,P2,data).
+    sim_distance(P1,P2,data2()).
 
-sim_distance(P1,P2,Prefs) ->
-    1/(1+sqrt(sum(sim_distances(P1,P2,Prefs)))).
+sim_distance(P1,P2,Tid) ->
+    1/(1+sqrt(sum(sim_distances(P1,P2,Tid)))).
 
-sim_distances(P1,P2,Prefs) ->
-    process_common_prefs(P1,P2,Prefs,fun(S1,S2) -> pow(S1-S2,2) end).
+sim_distances(P1,P2,Tid) ->
+    process_common_prefs(P1,P2,Tid,
+                         fun(S1,S2) -> pow(S1-S2,2) end).
+
+-ifdef(EUNIT).
+sim_distance_test() ->
+    ?assertMatch(0.3483314773547883, sim_distance("Toby","Lisa Rose")).
+-endif.
 
 
+process_common_prefs(P1,P2,Tid,F) ->
+    foldl(
+      fun({N1,S1},Acc) ->
+              try [F(S1,prop_get(N1,ets_lookup(P2,Tid))) | Acc]
+              catch _:_ -> Acc end
+      end, [], ets_lookup(P1,Tid)).
 
-process_common_prefs(P1,P2,Prefs,F) ->
-    [F(S1,S2) || {N1,S1} <- prefs(P1,Prefs),
-                 {N2,S2} <- prefs(P2,Prefs),
-                 N1 == N2].
-
-%% Group the data around the Movies (items) instead.
-transform_data() ->
-    transform_data(data()).
-
-transform_data(Data) ->
-    orddict:to_list(
-      lists:foldl(
-        fun({Person,L}, Dict) -> 
-                lists:foldl(
-                  fun({Movie,Pref},Dict2) ->
-                          orddict:update(
-                            Movie,
-                            fun(Z) -> [{Person,Pref}|Z] end,
-                            [{Person,Pref}],
-                            Dict2)
-                  end, Dict, L)
-        end, orddict:new(), Data)
-     ).
-                                                                   
-                        
-prefs(P,Prefs) ->
-    proplists:get_value(P, gen_data(Prefs)).
-
-gen_data(Prefs) when is_atom(Prefs) -> ?MODULE:Prefs();
-gen_data(Prefs) when is_list(Prefs) -> Prefs.
-
-data() ->
-    {ok,Data} = file:consult("priv/recommendations.data"),
-    Data.
+prop_get(Key, L) ->
+    case proplists:get_value(Key,L) of
+        undefined -> throw({prop_get,Key});
+        Value     -> Value
+    end.
     
 %% Should be in lists.erl...
 take(N,L) ->
@@ -221,6 +292,50 @@ take(N,L) ->
     catch _:_ -> L end.
     
 
+%% -----------------------------------
+%% @doc Data representation using ETS.
+%%
+
+ets_lookup(Key,Tid) ->
+    [{_,Val}] = ets:lookup(Tid,Key),Val.
+
+transform_data2() ->
+    transform_data2(data2()).
+
+%% @doc Create a new ETS table where the data is transposed.
+%% Input is an existing ETS table identifier containing the input data.
+%%
+transform_data2(Tid) ->
+    ets:foldl(
+      fun({K,L},Acc) ->
+              lists:foldl(
+                fun({A,B},Acc2) -> 
+                        ets_append(A,{K,B},Acc2)
+                end, Acc, L)
+      end, ets:new(?MODULE,[]), Tid).
+
+ets_append(Key,Val,Tid) ->
+    case ets:lookup(Tid, Key) of
+        [{_,Vals}] -> ets:insert(Tid, {Key,[Val|Vals]});
+        _          -> ets:insert(Tid, {Key,[Val]})
+    end,
+    Tid.
+                                                                   
+data2() ->
+    data2(data()).
+
+%% @doc Create a new ETS table and populate it from the input key-value list.
+%%
+data2(Data) ->
+    Tid = ets:new(?MODULE,[]),
+    lists:foreach(fun(X) -> ets:insert(Tid,X) end, Data),
+    Tid.
+                          
+
+data() ->
+    {ok,Data} = file:consult("priv/recommendations.data"),
+    Data.
+    
 
             
                             
