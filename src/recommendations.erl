@@ -12,8 +12,37 @@
 -import(math,  [pow/2,sqrt/1]).
 
 
-%% @doc Create a dictionary of items showing which other item they are most similar to.
+%% @doc Get weighted recommendations using a pre-calculated dictionary.
 %%
+%% By using a a pre-calculated item similarity dictionary (from 
+%% calc_similar_items/N) we don't need to go through the whole dataset.
+%% This function will get all items that a user has ranked, find the 
+%% similar items, and weight them according to how similar they are.
+%%
+get_recommended_items(Prefs, ItemDict, User) ->
+    UserRatings = prefs(User,Prefs),
+    %% Loop over items rated by this user
+    D = foldl(
+          fun({Item,Rating}, Dict) ->
+                  %% Loop over items similar to this one
+                  foldl(
+                    fun({Sim,Item2}, Dict2) ->
+                            case lists:keymember(Item2, 1, UserRatings) of
+                                %% Ignore if this user already has rated this item
+                                true  -> Dict2;
+                                false -> sim_sum_update(Item2, Rating, Sim, Dict2)
+                        end
+                    end,
+                    Dict, orddict:fetch(Item,ItemDict))
+          end,
+          orddict:new(), UserRatings),
+    reverse(sort([{Total/SimSum, Name} || 
+                     {Name, {Total,SimSum,_N}} <- orddict:to_list(D)])).
+ 
+    
+
+
+%% @doc Create a dictionary of items showing which other item they are most similar to.
 %%
 calc_similar_items()       -> calc_similar_items(data()).
 calc_similar_items(Data)   -> calc_similar_items(Data, 10).
