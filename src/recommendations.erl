@@ -37,8 +37,7 @@
 %%
 load_movie_lens() ->
     %% Get the movie titles.
-    {ok,Iz}=file:read_file("priv/u.item.zip"),
-    {ok,[{_Fname,IzBin}]} = zip:unzip(Iz,[memory]),
+    {ok,IzBin} = ci:get_u_item(),
     IzLines = string:tokens(binary_to_list(IzBin), "\n"),
     Movies = foldl(fun(Line,Mtid) -> 
                            [Id,Title|_] = string:tokens(Line,"|"),
@@ -47,8 +46,7 @@ load_movie_lens() ->
                    end, ets:new(?MODULE,[]), IzLines),
     
     %% Load data
-    {ok,Dz}=file:read_file("priv/u.data.zip"),
-    {ok,[{_Fname2,DzBin}]} = zip:unzip(Dz,[memory]),
+    {ok,DzBin} = ci:get_u_data(),
     DzLines = string:tokens(binary_to_list(DzBin), "\n"),
     foldl(fun(Line,Ptid) -> 
                   [User,Mid,Rating,_Ts|_] = string:tokens(Line,"\t"),
