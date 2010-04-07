@@ -16,6 +16,24 @@
 -define(p(Fs,As), true).
 %-define(p(Fs,As), io:format("~p: "++Fs,[time()|As])).
 
+%% @doc Output the data from one cluster
+%%
+%%  {RowNames,ColNames,Data} = clusters:csv(Fname).
+%%  C=clusters:kcluster(Data,10).
+%%  clusters:output(Fname2, RowNames, ColNames, Data, array:get(0,C)).
+%%
+output(Fname, RowNames, ColNames, Data, Indices) ->
+    DataTuple = list_to_tuple(Data),
+    Cs = string:join(tuple_to_list(ColNames),","),
+    L = string:join([Cs | [string:join([e(I,RowNames)
+                                        |[float_to_str(F) 
+                                          || F <- e(I,DataTuple)]],",") 
+                     || I <- Indices]],"\n"),
+    file:write_file(Fname,list_to_binary(L)).
+    
+float_to_str(F) when is_float(F) -> io_lib:format("~.2f",[F]);
+float_to_str(X)                  -> io_lib:format("~w",[X]).
+
 %% @doc Print what people want in a cluster
 %% Try: 
 %%
@@ -47,9 +65,10 @@ blognames(RowNames,Indices) ->
 %% Move the centroid to the average position if its cluster. Repeat until
 %% no more changes occurs.
 %%
-kcluster(Rows)              -> kcluster(Rows, 4).
-kcluster(Rows, K)           -> kcluster(Rows, K, pearson).
-kcluster(Rows, K, Distance) ->
+kcluster(Rows)                   -> kcluster(Rows, 4).
+kcluster(Rows, K)                -> kcluster(Rows, K, pearson).
+kcluster(Rows, K, Distance)      -> kcluster(Rows, K, Distance, 100).
+kcluster(Rows, K, Distance, Max) ->
     RowsTuple = list_to_tuple(Rows),
 
     ?p("Determine the minimum and maximum values for each column.~n",[]),
@@ -60,7 +79,6 @@ kcluster(Rows, K, Distance) ->
     Clusters = mk_random_clusters(K, ColRanges, Distance),
 
     try 
-        Max = 10,
         ?p("Begin iterate over the positions of the centroids.~n",[]),
         e(2,foldl(fun(_,{Cs,Matches,Iter}) ->
                           io:format("Iter ~p/~p~n",[Iter,Max]),
@@ -245,8 +263,19 @@ zebodata() ->
     {ok, Bin} = ci:get_zebo(),
     data(Bin).
 
-data(Bin) ->
-    AllLines  = string:tokens(binary_to_list(Bin), "\r\n"),
+%% @doc Read a csv file containing data
+%%
+csv(Fname) ->
+    {ok,Bin} = file:read_file(Fname),
+    data([comma2tab(Char) || Char <- binary_to_list(Bin)]).
+
+comma2tab($,) -> $\t;
+comma2tab(C)  -> C.
+    
+
+data(Bin) when is_binary(Bin) -> data(binary_to_list(Bin));
+data(List) when is_list(List) ->
+    AllLines  = string:tokens(List, "\r\n"),
     
     % First line is the column titles
     [ColNames|Lines] = AllLines,
@@ -256,9 +285,25 @@ data(Bin) ->
                       [Row|Ds] = string:tokens(Line, "\t\r"),
                       {[Row|RowNames_], 
                        % The data is a list of floats
-                       [[list_to_integer(string:strip(D))*1.0 || D <- Ds]|Data_]}
+                       [[list_to_integer(massage(string:strip(D)))*1.0 
+                         || D <- Ds]|Data_]}
               end, {[],[]}, Lines),
     % Return
     {list_to_tuple(RowNames), 
      list_to_tuple(string:tokens(ColNames,"\t")), 
      Data}.
+
+%% Do special massage on some values.
+massage("true")         -> "1";
+massage("false")        -> "0";
+massage("undefined")    -> "0";
+massage("none")         -> "0";
+massage("unmarried")    -> "1";
+massage("married")      -> "2";
+massage("divorced")     -> "3";
+massage("ex_married")   -> "4";
+massage("partnership")  -> "5";
+massage("widowed")      -> "6";
+massage(Else)           -> Else.
+
+    
