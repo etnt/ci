@@ -16,6 +16,18 @@
 -define(p(Fs,As), true).
 %-define(p(Fs,As), io:format("~p: "++Fs,[time()|As])).
 
+%% @doc Print what people want in a cluster
+%% Try: 
+%%
+%%  {RowNames,ColNames,Data} = clusters:zebodata().
+%%  C=clusters:kcluster(Data,10).
+%%  C=clusters:kcluster(Data,10, manhattan). % alt. tanimoto works bad, why?
+%%  clusters:wants(RowNames, array:get(0,C)).
+%%  [clusters:wants(RowNames, array:get(J,C)) || J <- lists:seq(0,9)].
+%%
+wants(RowNames,Indices) ->
+    [e(I,RowNames) || I <- Indices].
+    
 %% @doc Print the blog names of a cluster
 %% Try: 
 %%
@@ -45,34 +57,55 @@ kcluster(Rows, K, Distance) ->
     ColRanges = [min_max(Column) || Column <- Columns],
 
     ?p("Create k randomly placed centroids.~n",[]),
-    random:seed(erlang:now()),
-    Clusters = [[random:uniform()*(Max-Min) + Min
-                  || {Min,Max} <- ColRanges]
-                || _J <- seq(1,K)],
+    Clusters = mk_random_clusters(K, ColRanges, Distance),
 
     try 
+        Max = 10,
         ?p("Begin iterate over the positions of the centroids.~n",[]),
-        e(2,foldl(fun(_,{Cs,Matches}) ->
+        e(2,foldl(fun(_,{Cs,Matches,Iter}) ->
+                          io:format("Iter ~p/~p~n",[Iter,Max]),
                           case bestmatches(Rows, Distance, K, Cs) of
                               Matches     -> throw({finished,Matches});
                               BestMatches -> 
                                   {move_centroids(RowsTuple,K,BestMatches),
-                                   BestMatches}
+                                   BestMatches, Iter+1}
                           end
-                  end, {Clusters,mk_array(K)}, seq(1,100)))
+                  end, {Clusters,mk_array(K),1}, seq(1,Max)))
     catch 
         throw:{finished,Ms} -> Ms 
     end.
+
+mk_random_clusters(K, ColRanges, tanimoto) ->
+    random:seed(erlang:now()),
+    [[random:uniform() || _ <- ColRanges] 
+     || _J <- seq(1,K)];
+mk_random_clusters(K, ColRanges, _) ->
+    random:seed(erlang:now()),
+    [[random:uniform()*(Max-Min) + Min
+      || {Min,Max} <- ColRanges]
+     || _J <- seq(1,K)].
                                   
 
 %% @doc Move the centroids to the average of their members,
 %%
-move_centroids(RowsTuple,K, Bestmatches) ->
+move_centroids(RowsTuple,K,Bestmatches) ->
     ?p("Move the centroids to the average of their members.~n",[]),
-    [[average(Column) 
-      || Column <- rows2columns([e(I,RowsTuple) 
-                                 || I <- array:get(J,Bestmatches)])]
-     || J <- seq(0,K-1)].
+    [mk_new_centroid(RowsTuple,Bestmatches,J) || J <- seq(0,K-1)].
+
+mk_new_centroid(RowsTuple, Bestmatches, J) ->
+    try
+        C = [average(Column) 
+             || Column <- rows2columns([e(I,RowsTuple) 
+                                        || I <- array:get(J,Bestmatches)])],
+        % assert
+        true = length(C) > 0,
+        C
+    catch _:_ ->
+            % No Item was attached to this cluster.
+            % Let's just make Zero centroid.
+            [0.0 || _ <- seq(1,length(e(1,RowsTuple)))]
+    end.
+            
 
 average(L)             -> average(L,0,0).
 average([H|T],Sum,Len) -> average(T,H+Sum,1+Len);
@@ -95,6 +128,7 @@ bestmatches(Rows, Distance, K, Clusters) ->
 %% In:  [[C1,C2,...Cn] = R1, R2,...Rn] = Rows
 %% Out: [[R1C1,R2C1,...RnC1],...[R1Cn,R2Cn,...RmCn]] = Columns
 %%
+rows2columns([])                      -> [];
 rows2columns(Rows) when is_list(Rows) ->
     ?p("Transpose a list of rows to a list of columns.~n",[]),
     [[e(I,RowTuple) || RowTuple <- [list_to_tuple(Row) || Row <- Rows]]
@@ -127,6 +161,35 @@ min_max([],Min,Max)                -> {Min,Max}.
     
 e(I,T) when is_integer(I), is_tuple(T) ->
     element(I,T).
+
+
+%% @doc Tanimoto coefficient
+%%      
+%% For datasets that has just 1s and 0s (for presence or absence)
+%% we measure the overlap, i.e the ratio of the intersection set.
+%% A returned value of 1.0 indicates no sharing where 0.0 means
+%% that the two sets are exactly the same.
+%% 
+tanimoto(V1,V2) ->
+    {C1,C2,Shr} = 
+        foldl(fun({E1,E2},{S1,S2,S}) -> {S1+z(E1),S2+z(E1),S+z(E1,E2)}
+               end, {0,0,0}, lists:zip(V1,V2)),
+    1.0-(1.0*Shr)/(C1+C2-Shr).
+
+z(0) -> 0;
+z(_) -> 1.
+
+z(X,X) -> 1;
+z(_,_) -> 0.
+
+%% @doc Manhattan distance
+%%      
+%% The sum of the lengths of the projections of 
+%% the line segment between the points.
+%% 
+manhattan(V1,V2) ->
+    sqrt(sum([pow(X1-X2,2) || {X1,X2} <- lists:zip(V1,V2)])/length(V1)).
+    
 
 %% @doc Pearson Correlation Score
 %%      
@@ -171,6 +234,18 @@ pearson_test() ->
 %%
 blogdata() ->
     {ok, Bin} = ci:get_blogdata(),
+    data(Bin).
+
+%% @doc Read the Zebo data, taken from http://kiwitobes.com/clusters/zebo.txt
+%%
+%% Return: {RowNames::tuple(), ColNames::tuple(), RowData::datarows()}
+%% where: datarows() ::= [rowdata::list(), ... ]
+%%
+zebodata() ->
+    {ok, Bin} = ci:get_zebo(),
+    data(Bin).
+
+data(Bin) ->
     AllLines  = string:tokens(binary_to_list(Bin), "\r\n"),
     
     % First line is the column titles
@@ -181,7 +256,7 @@ blogdata() ->
                       [Row|Ds] = string:tokens(Line, "\t\r"),
                       {[Row|RowNames_], 
                        % The data is a list of floats
-                       [[list_to_integer(D)*1.0 || D <- Ds]|Data_]}
+                       [[list_to_integer(string:strip(D))*1.0 || D <- Ds]|Data_]}
               end, {[],[]}, Lines),
     % Return
     {list_to_tuple(RowNames), 
