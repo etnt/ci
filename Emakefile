@@ -1,8 +1,5 @@
 { './src/*', [
-	{ i, "./include" },
-	{ i, "./dep" },
-	{ i, "/home/tobbe/Kreditor/OTP/install/R13B03/lib/erlang/lib/inets-5.2/src"},
+	{ i, "/usr/lib/erlang/lib"},
 	{ outdir, "./ebin" },
 	debug_info
 ]}.
-

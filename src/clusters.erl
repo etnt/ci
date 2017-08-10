@@ -26,16 +26,16 @@ output(Fname, RowNames, ColNames, Data, Indices) ->
     DataTuple = list_to_tuple(Data),
     Cs = string:join(tuple_to_list(ColNames),","),
     L = string:join([Cs | [string:join([e(I,RowNames)
-                                        |[float_to_str(F) 
-                                          || F <- e(I,DataTuple)]],",") 
+                                        |[float_to_str(F)
+                                          || F <- e(I,DataTuple)]],",")
                      || I <- Indices]],"\n"),
     file:write_file(Fname,list_to_binary(L)).
-    
+
 float_to_str(F) when is_float(F) -> io_lib:format("~.2f",[F]);
 float_to_str(X)                  -> io_lib:format("~w",[X]).
 
 %% @doc Print what people want in a cluster
-%% Try: 
+%% Try:
 %%
 %%  {RowNames,ColNames,Data} = clusters:zebodata().
 %%  C=clusters:kcluster(Data,10).
@@ -45,9 +45,9 @@ float_to_str(X)                  -> io_lib:format("~w",[X]).
 %%
 wants(RowNames,Indices) ->
     [e(I,RowNames) || I <- Indices].
-    
+
 %% @doc Print the blog names of a cluster
-%% Try: 
+%% Try:
 %%
 %%  {RowNames,ColNames,Data} = clusters:blogdata().
 %%  C=clusters:kcluster(Data,10).
@@ -56,7 +56,7 @@ wants(RowNames,Indices) ->
 %%
 blognames(RowNames,Indices) ->
     [e(I,RowNames) || I <- Indices].
-    
+
 
 %% @doc K-means clustering
 %%
@@ -78,31 +78,31 @@ kcluster(Rows, K, Distance, Max) ->
     ?p("Create k randomly placed centroids.~n",[]),
     Clusters = mk_random_clusters(K, ColRanges, Distance),
 
-    try 
+    try
         ?p("Begin iterate over the positions of the centroids.~n",[]),
         e(2,foldl(fun(_,{Cs,Matches,Iter}) ->
                           io:format("Iter ~p/~p~n",[Iter,Max]),
                           case bestmatches(Rows, Distance, K, Cs) of
                               Matches     -> throw({finished,Matches});
-                              BestMatches -> 
+                              BestMatches ->
                                   {move_centroids(RowsTuple,K,BestMatches),
                                    BestMatches, Iter+1}
                           end
                   end, {Clusters,mk_array(K),1}, seq(1,Max)))
-    catch 
-        throw:{finished,Ms} -> Ms 
+    catch
+        throw:{finished,Ms} -> Ms
     end.
 
 mk_random_clusters(K, ColRanges, tanimoto) ->
     random:seed(erlang:now()),
-    [[random:uniform() || _ <- ColRanges] 
+    [[random:uniform() || _ <- ColRanges]
      || _J <- seq(1,K)];
 mk_random_clusters(K, ColRanges, _) ->
     random:seed(erlang:now()),
     [[random:uniform()*(Max-Min) + Min
       || {Min,Max} <- ColRanges]
      || _J <- seq(1,K)].
-                                  
+
 
 %% @doc Move the centroids to the average of their members,
 %%
@@ -112,8 +112,8 @@ move_centroids(RowsTuple,K,Bestmatches) ->
 
 mk_new_centroid(RowsTuple, Bestmatches, J) ->
     try
-        C = [average(Column) 
-             || Column <- rows2columns([e(I,RowsTuple) 
+        C = [average(Column)
+             || Column <- rows2columns([e(I,RowsTuple)
                                         || I <- array:get(J,Bestmatches)])],
         % assert
         true = length(C) > 0,
@@ -123,12 +123,12 @@ mk_new_centroid(RowsTuple, Bestmatches, J) ->
             % Let's just make Zero centroid.
             [0.0 || _ <- seq(1,length(e(1,RowsTuple)))]
     end.
-            
+
 
 average(L)             -> average(L,0,0).
 average([H|T],Sum,Len) -> average(T,H+Sum,1+Len);
 average([],Sum,Len)    -> Sum/Len.
-    
+
 
 %% @doc Group the rows around the closest centroid.
 %% Return an array of size K, where each entry I contains a list
@@ -136,7 +136,7 @@ average([],Sum,Len)    -> Sum/Len.
 %%
 bestmatches(Rows, Distance, K, Clusters) ->
     ?p("Group the rows around their closest centroid.~n",[]),
-    e(2, foldl(fun(Row,{J,Arr}) -> 
+    e(2, foldl(fun(Row,{J,Arr}) ->
                        I = bestmatch(Clusters, Row, Distance),
                        {J+1,append_array_val(I,J,Arr)}
                end, {1, mk_array(K)}, Rows)).
@@ -152,7 +152,7 @@ rows2columns(Rows) when is_list(Rows) ->
     [[e(I,RowTuple) || RowTuple <- [list_to_tuple(Row) || Row <- Rows]]
      || I <- seq(1,length(hd(Rows)))].
 
-mk_array(K) ->    
+mk_array(K) ->
     array:new([{size,K},{fixed,true},{default,[]}]).
 
 append_array_val(K,V,Arr) ->
@@ -169,27 +169,27 @@ bestmatch(Clusters, Row, Distance) ->
                       end
               end, {0, 0, ?MODULE:Distance(hd(Clusters),Row)}, tl(Clusters)),
     e(2,R).
-                          
+
 min_max([H|T]) -> min_max(T,H,H).
 
 min_max([H|T],Min,Max) when H=<Min -> min_max(T,H,Max);
 min_max([H|T],Min,Max) when H>Max  -> min_max(T,Min,H);
 min_max([_|T],Min,Max)             -> min_max(T,Min,Max);
 min_max([],Min,Max)                -> {Min,Max}.
-    
+
 e(I,T) when is_integer(I), is_tuple(T) ->
     element(I,T).
 
 
 %% @doc Tanimoto coefficient
-%%      
+%%
 %% For datasets that has just 1s and 0s (for presence or absence)
 %% we measure the overlap, i.e the ratio of the intersection set.
 %% A returned value of 1.0 indicates no sharing where 0.0 means
 %% that the two sets are exactly the same.
-%% 
+%%
 tanimoto(V1,V2) ->
-    {C1,C2,Shr} = 
+    {C1,C2,Shr} =
         foldl(fun({E1,E2},{S1,S2,S}) -> {S1+z(E1),S2+z(E1),S+z(E1,E2)}
                end, {0,0,0}, lists:zip(V1,V2)),
     1.0-(1.0*Shr)/(C1+C2-Shr).
@@ -201,19 +201,19 @@ z(X,X) -> 1;
 z(_,_) -> 0.
 
 %% @doc Manhattan distance
-%%      
-%% The sum of the lengths of the projections of 
+%%
+%% The sum of the lengths of the projections of
 %% the line segment between the points.
-%% 
+%%
 manhattan(V1,V2) ->
     sqrt(sum([pow(X1-X2,2) || {X1,X2} <- lists:zip(V1,V2)])/length(V1)).
-    
+
 
 %% @doc Pearson Correlation Score
-%%      
+%%
 %% Takes two list of numbers and return their correlation score.
 %% Nb: smaller == more similar
-%% 
+%%
 pearson(V1,V2) ->
     % Simple sums
     Sum1 = sum(V1),
@@ -225,7 +225,7 @@ pearson(V1,V2) ->
 
     % Sum up the products
     Psum = sum([S1*S2 || {S1,S2} <- zip(V1,V2)]),
-    
+
     % Calculate r (Pearson score)
     N   = length(V1),
     Num = Psum - (Sum1*Sum2/N),
@@ -271,26 +271,26 @@ csv(Fname) ->
 
 comma2tab($,) -> $\t;
 comma2tab(C)  -> C.
-    
+
 
 data(Bin) when is_binary(Bin) -> data(binary_to_list(Bin));
 data(List) when is_list(List) ->
     AllLines  = string:tokens(List, "\r\n"),
-    
+
     % First line is the column titles
     [ColNames|Lines] = AllLines,
-    {RowNames, Data} = 
+    {RowNames, Data} =
         foldl(fun(Line, {RowNames_,Data_}) ->
                       % First column in each row is the rowname
                       [Row|Ds] = string:tokens(Line, "\t\r"),
-                      {[Row|RowNames_], 
+                      {[Row|RowNames_],
                        % The data is a list of floats
-                       [[list_to_integer(massage(string:strip(D)))*1.0 
+                       [[list_to_integer(massage(string:strip(D)))*1.0
                          || D <- Ds]|Data_]}
               end, {[],[]}, Lines),
     % Return
-    {list_to_tuple(RowNames), 
-     list_to_tuple(string:tokens(ColNames,"\t")), 
+    {list_to_tuple(RowNames),
+     list_to_tuple(string:tokens(ColNames,"\t")),
      Data}.
 
 %% Do special massage on some values.
@@ -305,5 +305,3 @@ massage("ex_married")   -> "4";
 massage("partnership")  -> "5";
 massage("widowed")      -> "6";
 massage(Else)           -> Else.
-
-    

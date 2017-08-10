@@ -17,7 +17,7 @@
 %% @doc Load the MovieLens dataset.
 %%
 %% This function creates a dictionary based on the "Movie Lens Data Sets",
-%% that can be downloaded from: http://www.grouplens.org/ 
+%% that can be downloaded from: http://www.grouplens.org/
 %% Try, for userid(87):
 %%
 %%  Prefs = load_movie_lens().
@@ -39,16 +39,16 @@ load_movie_lens() ->
     %% Get the movie titles.
     {ok,IzBin} = ci:get_u_item(),
     IzLines = string:tokens(binary_to_list(IzBin), "\n"),
-    Movies = foldl(fun(Line,Mtid) -> 
+    Movies = foldl(fun(Line,Mtid) ->
                            [Id,Title|_] = string:tokens(Line,"|"),
                            ets:insert(Mtid,{Id,Title}),
                            Mtid
                    end, ets:new(?MODULE,[]), IzLines),
-    
+
     %% Load data
     {ok,DzBin} = ci:get_u_data(),
     DzLines = string:tokens(binary_to_list(DzBin), "\n"),
-    foldl(fun(Line,Ptid) -> 
+    foldl(fun(Line,Ptid) ->
                   [User,Mid,Rating,_Ts|_] = string:tokens(Line,"\t"),
                   ets_append(User,
                              {ets_lookup(Mid,Movies),
@@ -60,14 +60,14 @@ load_movie_lens() ->
 append_to_dict(Key, Value, Dict) ->
     try orddict:append(Key, Value, Dict)
     catch _:_ -> orddict:store(Key, [Value], Dict) end.
-        
+
 
 
 %% @doc Get weighted recommendations using a pre-calculated dictionary.
 %%
-%% By using a a pre-calculated item similarity dictionary (from 
+%% By using a a pre-calculated item similarity dictionary (from
 %% calc_similar_items/N) we don't need to go through the whole dataset.
-%% This function will get all items that a user has ranked, find the 
+%% This function will get all items that a user has ranked, find the
 %% similar items, and weight them according to how similar they are.
 %%
 get_recommended_items(User) ->
@@ -94,10 +94,9 @@ get_recommended_items(ItemTid, UserRatings) ->
                     Dict, ets_lookup(Item, ItemTid))
           end,
           orddict:new(), UserRatings),
-    reverse(sort([{Total/SimSum, Name} || 
+    reverse(sort([{Total/SimSum, Name} ||
                      {Name, {Total,SimSum,_N}} <- orddict:to_list(D)])).
- 
-    
+
 -ifdef(EUNIT).
 get_recommended_items_test() ->
     ?assertMatch({3.1667425234070894,"The Night Listener"},
@@ -139,15 +138,15 @@ print(_, _)                         -> ok.
 
 
 %% @doc Get a movie recommendation.
-%%      
+%%
 %% Return a guess at what my rating would be.
 %% Produce a weighted score that calculates how similar
-%% a critics is to me and what score the movie got from him/her. 
+%% a critics is to me and what score the movie got from him/her.
 %% Try:
 %%
 %%   get_recommendations("Toby")
 %%
-%% By swapping the data you can also get a recommended critics for a movie:     
+%% By swapping the data you can also get a recommended critics for a movie:
 %%
 %%  get_recommendations("Just My Luck",sim_pearson,transform_data).
 %%
@@ -156,17 +155,17 @@ get_recommendations(Person) ->
 
 get_recommendations(Person, Similarity, Tid) ->
     Dict = sim_sum(Person, Similarity, Tid, orddict:new()),
-    reverse(sort([{Total/SimSum, Name} || 
+    reverse(sort([{Total/SimSum, Name} ||
                      {Name, {Total,SimSum,_N}} <- orddict:to_list(Dict)])).
 
 -ifdef(EUNIT).
 get_recommendations_test() ->
     ?assertMatch({3.9024195568915734,"Superman Returns"}, hd(get_recommendations("Toby"))).
 -endif.
-    
+
 
 sim_sum(Person, Similarity, Tid, Dict) ->
-    F = fun({Other,L},Acc) when Other /= Person -> 
+    F = fun({Other,L},Acc) when Other /= Person ->
                 sim_sum_prefs(L, ?MODULE:Similarity(Person,Other,Tid), Acc);
            (_,Acc) -> Acc
         end,
@@ -180,16 +179,16 @@ sim_sum_prefs(_Prefs, _Sim, Dict) ->
     Dict.
 
 sim_sum_update(Key, Point, Sim, Dict) ->
-    orddict:update(Key, 
-                   fun({V,S,N}) -> {(Point*Sim)+V,S+Sim,N+1} end, 
-                   {Point*Sim,Sim,1}, 
+    orddict:update(Key,
+                   fun({V,S,N}) -> {(Point*Sim)+V,S+Sim,N+1} end,
+                   {Point*Sim,Sim,1},
                    Dict).
-           
+
 
 %% @doc Critcs with most similar tastes as 'mine'
 %%
 %% Which advice should I take?
-%% Try: 
+%% Try:
 %%
 %%   top_matches("Toby",3) to find out.
 %%
@@ -201,7 +200,7 @@ top_matches(P)              -> top_matches(P,5).
 top_matches(P,N)            -> top_matches(P,N,sim_pearson).
 top_matches(P,N,Similarity) -> top_matches(P,N,Similarity,data2()).
 top_matches(Person,N,Similarity,Tid) ->
-    Scores = 
+    Scores =
         ets:foldl(
           fun({Other,_},Acc) when Other /= Person ->
                   [{?MODULE:Similarity(Person,Other,Tid),Other}|Acc];
@@ -213,13 +212,13 @@ top_matches(Person,N,Similarity,Tid) ->
 top_matches_test() ->
     ?assertMatch({0.9912407071619297,"Lisa Rose"}, hd(top_matches("Toby"))).
 -endif.
-    
+
 
 %% @doc Pearson Correlation Score
-%%      
+%%
 %% This method tend to give better results when the
 %% input data isn't well normalized.
-%% 
+%%
 sim_pearson(P1,P2) ->
     sim_pearson(P1,P2,data2()).
 
@@ -235,13 +234,13 @@ sim_pearson(P1,P2,Tid) ->
     % Sum up the products
     {Psum,_} = sum_pearson(P1,P2,Tid,
                            fun(S1,S2) -> {S1*S2,0} end),
-    
+
     % Calculate Pearson score
     N   = sum(process_common_prefs(P1,P2,Tid,
                                    fun(_,_) -> 1 end)),
     Num = Psum - (Sum1*(Sum2/N)),
     Den = den(Sum1Sq,Sum2Sq,Sum1,Sum2,N),
-    if (Den == 0) -> 
+    if (Den == 0) ->
             0;
        true ->
             Num/Den
@@ -249,7 +248,7 @@ sim_pearson(P1,P2,Tid) ->
 
 den(Sum1Sq,Sum2Sq,Sum1,Sum2,N) ->
     sqrt(Sum1Sq - pow(Sum1,2) / N) * sqrt(Sum2Sq - pow(Sum2,2) / N).
-                                   
+
 sum_pearson(P1,P2,Tid,F) ->
     L = process_common_prefs(P1,P2,Tid,F),
     foldl(fun({X1,X2}, {Acc1,Acc2}) -> {X1+Acc1,X2+Acc2} end, {0,0}, L).
@@ -261,10 +260,10 @@ sim_pearson_test() ->
 
 
 %% @doc Euclidean Distance
-%%      
-%% Computes a similarity score between two persons by 
+%%
+%% Computes a similarity score between two persons by
 %% calculating the distance between each preference.
-%% 
+%%
 sim_distance(P1,P2) ->
     sim_distance(P1,P2,data2()).
 
@@ -293,12 +292,12 @@ prop_get(Key, L) ->
         undefined -> throw({prop_get,Key});
         Value     -> Value
     end.
-    
+
 %% Should be in lists.erl...
 take(N,L) ->
     try {R,_} = lists:split(N,L), R
     catch _:_ -> L end.
-    
+
 
 %% -----------------------------------
 %% @doc Data representation using ETS.
@@ -317,7 +316,7 @@ transform_data2(Tid) ->
     ets:foldl(
       fun({K,L},Acc) ->
               lists:foldl(
-                fun({A,B},Acc2) -> 
+                fun({A,B},Acc2) ->
                         ets_append(A,{K,B},Acc2)
                 end, Acc, L)
       end, ets:new(?MODULE,[]), Tid).
@@ -328,7 +327,7 @@ ets_append(Key,Val,Tid) ->
         _          -> ets:insert(Tid, {Key,[Val]})
     end,
     Tid.
-                                                                   
+
 data2() ->
     data2(data()).
 
@@ -338,12 +337,8 @@ data2(Data) ->
     Tid = ets:new(?MODULE,[]),
     lists:foreach(fun(X) -> ets:insert(Tid,X) end, Data),
     Tid.
-                          
+
 
 data() ->
     {ok,Data} = file:consult("priv/recommendations.data"),
     Data.
-    
-
-            
-                            
